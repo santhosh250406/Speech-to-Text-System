@@ -1,0 +1,76 @@
+## code implementation ##
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+import os
+import tarfile
+import torch
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+import librosa
+
+!pip install jiwer
+from jiwer import wer
+
+# Define paths
+dataset_path = "/content/drive/MyDrive/test-clean.tar.gz"
+extracted_path = "/content/test-clean"  # Directory where the dataset will be extracted
+
+# Step 1: Extract the Dataset
+def extract_dataset(archive_path, output_path):
+    if not os.path.exists(output_path):
+        print("Extracting dataset...")
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(path=output_path)
+        print("Extraction completed.")
+    else:
+        print("Dataset already extracted.")
+
+# Step 2: Preprocess Audio
+def preprocess_audio(file_path, target_sample_rate=16000):
+    audio, sr = librosa.load(file_path, sr=target_sample_rate)  # Resample to 16kHz
+    return audio
+
+# Step 3: Perform Speech-to-Text Inference
+def speech_to_text(audio_file, model, processor):
+    audio_input = preprocess_audio(audio_file)
+    inputs = processor(audio_input, sampling_rate=16000, return_tensors="pt", padding=True)
+    
+    # Perform inference
+    with torch.no_grad():
+        logits = model(inputs.input_values).logits
+    
+    # Decode the output
+    predicted_ids = torch.argmax(logits, dim=-1)
+    transcription = processor.batch_decode(predicted_ids)[0]
+    return transcription
+
+# Step 4: Evaluate Transcription with WER
+def evaluate_model(predicted_text, reference_text):
+    return wer(reference_text, predicted_text)
+
+# Main Program
+if __name__ == "__main__":
+    # Extract dataset
+    extract_dataset(dataset_path, extracted_path)
+
+    # Load the pre-trained Wav2Vec 2.0 model and processor
+    model_name = "facebook/wav2vec2-base-960h"
+    processor = Wav2Vec2Processor.from_pretrained(model_name)
+    model = Wav2Vec2ForCTC.from_pretrained(model_name)
+
+    # Iterate through extracted audio files
+    audio_dir = os.path.join(extracted_path, "LibriSpeech", "test-clean")
+    for root, dirs, files in os.walk(audio_dir):
+        for file in files:
+            if file.endswith(".flac"):
+                # Convert .flac file to text
+                audio_file_path = os.path.join(root, file)
+                print(f"Processing: {audio_file_path}")
+                transcription = speech_to_text(audio_file_path, model, processor)
+                print(f"Transcription: {transcription}")
+                
+                # If reference text is available, calculate WER
+                # Replace the next line with actual reference text
+                reference_text = "Your expected transcription for the audio file."
+                print(f"WER: {evaluate_model(transcription, reference_text)}")
